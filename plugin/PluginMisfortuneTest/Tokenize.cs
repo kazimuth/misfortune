@@ -80,5 +80,22 @@ namespace PluginMisfortuneTest
             byte[] outChunk2 = text.Skip(offsets[1]).Take(lengths[1]).ToArray();
             CollectionAssert.AreEqual(goodChunk2, outChunk2, "Correct unicode should be extracted");
         }
+
+        [TestMethod]
+        public void TestContainingNewlines()
+        {
+            byte[] text = Encoding.UTF8.GetBytes("1\n3\n%\n4\n6\n%\n7\n9");
+            List<int> offsets, lengths;
+            FortunesMetadata.TokenizeFortunes(text, out offsets, out lengths);
+
+            Assert.AreEqual(3, offsets.Count, "There should be three fortune offsets");
+            Assert.AreEqual(3, lengths.Count, "There should be three fortune lengths");
+            Assert.AreEqual(0, offsets[0]);
+            Assert.AreEqual(6, offsets[1]);
+            Assert.AreEqual(12, offsets[2]);
+            Assert.AreEqual(3, lengths[0]);
+            Assert.AreEqual(3, lengths[1]);
+            Assert.AreEqual(3, lengths[2]);
+        }
     }
 }

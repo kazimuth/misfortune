@@ -11,18 +11,11 @@ namespace PluginMisfortune
     /// A kind of tiny database describing all of the fortune files available.
     /// This class is not thread safe.
     /// </summary>
-    [Serializable()]
     public class FortunesMetadata
     {
         /// <summary>
-        /// The file we save the metadata database to.
-        /// </summary>
-        public const string MetadataFilename = "metadata.bin";
-
-        /// <summary>
         /// Information for an individual fortune file.
         /// </summary>
-        [Serializable()]
         private struct FileMetadata
         {
             /// <summary>
@@ -58,47 +51,14 @@ namespace PluginMisfortune
         /// Create a FortunesMetadata with a particular directory.
         /// </summary>
         /// <param name="dir"></param>
-        private FortunesMetadata(string dir)
-        {
-            this.Dir = dir;
-            this.FortuneFiles = new Dictionary<string, FileMetadata>();
-        }
-
-        /// <summary>
-        /// Load the fortune metadata from a directory.
-        /// </summary>
-        /// <param name="dir">The directory to load from.</param>
-        public static FortunesMetadata LoadFrom(string dir)
+        public FortunesMetadata(string dir)
         {
             dir = Path.GetFullPath(dir);
+            Log.Notice("Loading fortunes from '{0}'", dir);
 
-            Rainmeter.API.Log(Rainmeter.API.LogType.Notice, String.Format(
-                "Loading fortunes from '{0}'", dir));
-
-            string metadataFile = Path.Combine(dir, MetadataFilename);
-            if (File.Exists(metadataFile))
-            {
-                Rainmeter.API.Log(Rainmeter.API.LogType.Debug, String.Format(
-                    "Loading fortune metadata from '{0}'", metadataFile));
-
-                using (Stream stream = File.OpenRead(metadataFile))
-                {
-                    FortunesMetadata data =
-                        (FortunesMetadata)new BinaryFormatter().Deserialize(stream);
-                    data.Dir = dir;
-                    data.Refresh();
-                    return data;
-                }
-            }
-            else
-            {
-                Rainmeter.API.Log(Rainmeter.API.LogType.Notice, String.Format(
-                    "No metadata file found, creating '{0}'", metadataFile));
-
-                FortunesMetadata data = new FortunesMetadata(dir);
-                data.Refresh();
-                return data;
-            }
+            this.Dir = dir;
+            this.FortuneFiles = new Dictionary<string, FileMetadata>();
+            this.Refresh();
         }
 
         /// <summary>
@@ -106,11 +66,22 @@ namespace PluginMisfortune
         /// </summary>
         public void Refresh()
         {
-            Rainmeter.API.Log(Rainmeter.API.LogType.Notice, "Refreshing fortunes");
+            Log.Notice("Refreshing fortunes");
             foreach (string fileName in Directory.GetFiles(this.Dir, "*", SearchOption.AllDirectories)) 
             {
                 this.RefreshFile(fileName);
             }
+            this.LogSize();
+        }
+
+        public void LogSize()
+        {
+            int totalSize = 0;
+            foreach (FileMetadata metadata in this.FortuneFiles.Values)
+            {
+                totalSize += metadata.FortuneLengths.Sum();
+            }
+            Log.Notice("Total fortune size: {0}", totalSize);
         }
 
         /// <summary>
@@ -134,14 +105,13 @@ namespace PluginMisfortune
             FileInfo fileInfo = new FileInfo(fullPath);
 
             if (meta.UpdatedAt > fileInfo.LastWriteTimeUtc ||
-                fileName == MetadataFilename ||
                 (fileInfo.Attributes & (FileAttributes.Hidden | FileAttributes.Device | FileAttributes.Directory)) != 0)
             {
-                Rainmeter.API.Log(Rainmeter.API.LogType.Debug, String.Format("Skipping refresh of '{}'", fileName));
+                Log.Debug("Skipping refresh of '{0}'", fileName);
                 return;
             }
 
-            Rainmeter.API.Log(Rainmeter.API.LogType.Notice, String.Format("Refreshing metadata for file '{}'", fileName));
+            Log.Notice("Refreshing metadata for file '{0}'", fileName);
 
             byte[] text = File.ReadAllBytes(fullPath);
 
@@ -151,18 +121,8 @@ namespace PluginMisfortune
 
             meta.FortuneLengths = lengths.ToArray();
             meta.FortuneOffsets = offsets.ToArray();
+            meta.UpdatedAt = DateTime.UtcNow;
             this.FortuneFiles[fileName] = meta;
-        }
-
-        /// <summary>
-        /// Save the fortune metadata to a directory.
-        /// </summary>
-        public void Save()
-        {
-            using (Stream stream = File.OpenWrite(Path.Combine(this.Dir, MetadataFilename)))
-            {
-                new BinaryFormatter().Serialize(stream, this);
-            }
         }
 
         /// <summary>
@@ -195,8 +155,7 @@ namespace PluginMisfortune
 
             int fortune = new Random().Next(fortuneCount);
 
-            Rainmeter.API.Log(Rainmeter.API.LogType.Debug,
-                String.Format("Selected fortune index {0} ({1} total)", fortune, fortuneCount));
+            Log.Debug("Selected fortune index {0} ({1} total)", fortune, fortuneCount);
 
             int currentStart = 0;
             foreach (var pair in this.FortuneFiles.Where((pair) => matcher(pair.Key)))
@@ -227,9 +186,8 @@ namespace PluginMisfortune
         public string GetFortune(string fileName, int index)
         {
             var meta = FortuneFiles[fileName];
-            Rainmeter.API.Log(Rainmeter.API.LogType.Debug,
-                String.Format("Reading from '{0}', index {1}, offset {2}, length {3}",
-                fileName, index, meta.FortuneOffsets[index], meta.FortuneLengths[index]));
+            Log.Debug("Reading from '{0}', index {1}, offset {2}, length {3}",
+                fileName, index, meta.FortuneOffsets[index], meta.FortuneLengths[index]);
 
             using (var file = new FileStream(Path.Combine(this.Dir, fileName), FileMode.Open, FileAccess.Read))
             {
@@ -299,7 +257,11 @@ namespace PluginMisfortune
                         // If we're percent, we're still percent
                         break;
                     default:
-                        if (state == State.NEWLINE2)
+                        if (state == State.NEWLINE1)
+                        {
+                            state = State.TEXT;
+                        }
+                        else if (state == State.NEWLINE2)
                         {
                             // We've gone newline -> percent -> newline!
                             // Starting a new fortune now.

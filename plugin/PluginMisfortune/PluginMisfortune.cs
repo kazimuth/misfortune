@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 using Rainmeter;
@@ -14,12 +15,40 @@ using Rainmeter;
 /// </summary>
 namespace PluginMisfortune
 {
+    internal class Log
+    {
+        internal const string Prefix = "PluginMisfortune: ";
+
+        internal static void Debug(string format, params object[] args)
+        {
+            Rainmeter.API.Log(Rainmeter.API.LogType.Debug, Prefix + String.Format(format, args));
+        }
+
+        internal static void Notice(string format, params object[] args)
+        {
+            Rainmeter.API.Log(Rainmeter.API.LogType.Notice, Prefix + String.Format(format, args));
+        }
+
+        internal static void Warning(string format, params object[] args)
+        {
+            Rainmeter.API.Log(Rainmeter.API.LogType.Warning, Prefix + String.Format(format, args));
+        }
+
+        internal static void Error(string format, params object[] args)
+        {
+            Rainmeter.API.Log(Rainmeter.API.LogType.Error, Prefix + String.Format(format, args));
+        }
+    }
+
     internal class Measure
     {
         internal string dirpath;
         internal string currentFortune;
         internal FortunesMetadata metadata;
         internal FortunesMetadata.FileMatcher matcher;
+
+        internal const string GenericErrorString =
+            "You are destined to encounter errors with the Misfortune rainmeter plugin.\nSee log for details.";
 
         internal Measure()
         {
@@ -28,15 +57,14 @@ namespace PluginMisfortune
 
         internal void Reload(Rainmeter.API api, ref double maxValue)
         {
-            this.dirpath = api.ReadPath("FortunesDir", api.ReplaceVariables("#@#fortunes"));
+            this.dirpath = api.ReadPath("Directory", api.ReplaceVariables("#@#fortunes"));
 
-            string prefixes = api.ReadString("Prefixes", null);
-            string regex = api.ReadString("Regex", null);
+            string prefixes = api.ReadString("Prefixes", "");
+            string regex = api.ReadString("Regex", "");
 
-            if (prefixes != null && regex != null)
+            if (prefixes != "" && regex != "")
             {
-                Rainmeter.API.Log(Rainmeter.API.LogType.Warning,
-                    "Both 'Prefixes' and 'Regexes' are set. Arbitrarily selecting Prefixes.");
+                Log.Warning("Both 'Prefixes' and 'Regexes' are set. Arbitrarily selecting Prefixes.");
             }
 
             if (prefixes != null)
@@ -66,24 +94,44 @@ namespace PluginMisfortune
 
             try
             {
-                this.metadata = FortunesMetadata.LoadFrom(this.dirpath);
-                this.metadata.Refresh();
+                this.metadata = new FortunesMetadata(this.dirpath);
             }
             catch (Exception e)
             {
-                this.currentFortune =
-                    "You are destined to encounter errors with the Misfortune rainmeter plugin.\nSee log for details.";
-                Rainmeter.API.Log(Rainmeter.API.LogType.Error, e.ToString());
+                this.currentFortune = GenericErrorString;
+                if (e is DirectoryNotFoundException)
+                {
+                    Log.Error("Directory not found: '{0}'", e.Message);
+                }
+                else
+                {
+                    Log.Error("{0}", e.ToString());
+                }
             }
         }
 
-        // Return a new fortune every time we reload.
+        /// <summary>
+        /// Update the contained fortune string.
+        /// </summary>
+        /// <returns>0</returns>
         internal double Update()
         {
-            this.currentFortune = this.metadata.GetRandomMatching(this.matcher);
+            if (this.metadata == null)
+            {
+                Log.Error("Fortune database not loaded, can't update.");
+                return 0;
+            }
 
-            // Always return 0, what do you want?
-            return 0.0;
+            try
+            {
+                this.currentFortune = this.metadata.GetRandomMatching(this.matcher);
+            }
+            catch (Exception e)
+            {
+                this.currentFortune = GenericErrorString;
+                Log.Error("{0}", e.ToString());
+            }
+            return 0;
         }
         
         internal string GetString()
